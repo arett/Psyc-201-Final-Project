@@ -200,7 +200,7 @@ ggplot(data = ted.data.transcripts, mapping = aes(published_date_readable, log.v
 
 After norming the views so we have a variable showing views/day we can see that the date that the video was published (including the high view outliers) does account for a significant amount of variance in number of views (R^2 = 0.154). F(1, 2465) = 447.54, p < 0.005. 
 
-***Views & Comments 
+*Views & Comments 
 
 Mean Comments (SD) = 192.57(284.83)
 
