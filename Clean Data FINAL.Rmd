@@ -205,7 +205,7 @@ ted.data.transcripts %>%
 
 NOW, to publish our cleaned up CSV 
 
-```{r}
+```{r, eval = FALSE}
 write.csv(ted.data.transcripts, file = "Cleaned.ted.data.transcripts.csv")
 ```
 
