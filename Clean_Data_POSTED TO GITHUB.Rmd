@@ -578,7 +578,7 @@ ted.data.transcripts %>%
   ggtitle("Views as a Function of Number of Sentiment Words used for MALES and FEMALES")
 
 
-# model again with all predictors logged) 
+# model again with all predictors logged
 lm.all.sent.log = lm(data = ted.data.transcripts, logviews ~ loganger + loganticipation + logdisgust + logfear + logjoy + lognegative + logpositive + logsadness + logsurprise + logtrust)
 summary(lm.all.sent.log)
 
@@ -592,12 +592,10 @@ anova(lm.gender.sent)
 
 # more accurately looking at the interaction instead... 
 
-lm.gender.sent = lm(data = ted.data.transcripts, logviews ~ gender*log10(sentiment_sum))
+lm.gender.sent = lm(data = ted.data.transcripts, logviews ~ gender*logsentiment_sum)
 anova(lm.gender.sent)
 str(ted.data.transcripts)
 
-ted.data.transcripts2 <- ted.data.transcripts %>%
-  mutate(sentiment_sum = as.numeric(sentiment_sum))
 ```
 
 
