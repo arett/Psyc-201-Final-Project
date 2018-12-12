@@ -209,3 +209,17 @@ NOW, to publish our cleaned up CSV
 write.csv(ted.data.transcripts, file = "Cleaned.ted.data.transcripts.csv")
 ```
 
+A little extra code: adding columns for laughter 
+
+```{r}
+#first of all we need to make sure all the transcripts are in lowercase so we can work on them.
+#also calculating the number of senteces, laughters, and applauses.
+ted.data.transcripts <-
+  ted.data.transcripts %>% 
+  mutate(transcript = tolower(transcript),
+         laugh.count = str_count(transcript,
+                                 pattern = "(laughter)"),
+         applause.count = str_count(transcript,
+                                    pattern = "(applause)"))
+```
+
