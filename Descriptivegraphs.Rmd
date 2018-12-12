@@ -1,0 +1,310 @@
+---
+title: "Descriptive Graphs"
+author: "Stefanie Holden, Debra Lindsay, Andrew Marin, & Alex Rett"
+date: "12/11/2018"
+output: html_document
+---
+
+This is the cleaned csv that has had
+- Music performances removed
+- Videos published after April 28 2017 removed
+- Views and comments logged
+- Gender predicted from first name
+```{r load data}
+clean.ted <- 
+  read.csv("Cleaned.ted.data.transcripts.csv")
+
+#install.packages("ggsci")
+library(tidyverse)
+library(tidytext)
+library(ggsci)
+library(emmeans)
+```
+
+#Graphs
+
+Views and Comments by Occupation
+
+```{r occupation graphs}
+
+#find the top ten occupations
+top.10.occupations <-
+clean.ted %>% 
+  group_by(speaker_occupation) %>%
+  summarise(occ.freq = n()) %>% 
+  arrange(desc(occ.freq)) %>% 
+  head(n = 10) %>% 
+  select(speaker_occupation) %>% 
+  as.matrix() 
+
+#recode all the other occupations to 'other'
+levels(clean.ted$speaker_occupation)[which(!levels(clean.ted$speaker_occupation) %in% top.10.occupations)] <- "other"
+
+
+Views.Occupation <-
+clean.ted %>% 
+  filter(!is.na(speaker_occupation)) %>% 
+  ggplot(aes(x = reorder(speaker_occupation, -logviews), 
+             y = logviews)) +
+  geom_boxplot(aes(fill = speaker_occupation)) +
+  labs(title = "Views by Occupation of Speaker", x = "Occupation of Speaker", y =  "Logged Views") +
+  theme(axis.text.x = element_text(angle = 75, hjust = 1)) +
+  guides(fill = FALSE) +
+  scale_fill_futurama()
+
+#ggsave("views_occ.png", Views.Occupation)
+Views.Occupation
+
+Comments.Occupation <-
+clean.ted %>% 
+  filter(!is.na(speaker_occupation)) %>% 
+  ggplot(aes(x = reorder(speaker_occupation, -logcomm), y = logcomm)) +
+  geom_boxplot(aes(fill = speaker_occupation)) +
+  labs(title = "Comments by Occupation of Speaker", x = "Occupation of Speaker", y =  "Logged Comments") +
+  theme(axis.text.x = element_text(angle = 75, hjust = 1)) +
+  guides(fill = FALSE) +
+  scale_fill_futurama()
+
+#ggsave("com_occ.png", Comments.Occupation)
+Comments.Occupation
+
+
+```
+ 
+ Views and Comments by Theme
+ 
+```{r theme graphs}
+
+#pulling out tags - currently a factor
+
+clean.ted$tags <-
+  as.character(clean.ted$tags)
+
+clean.ted$tags <-
+gsub("\\[|\\]|\\'", "", clean.ted$tags)
+
+clean.ted <-
+  clean.ted %>% 
+  separate(tags, into = c("first_tag","other_tags"), sep = ",") 
+
+clean.ted$first_tag <-
+  as.factor(clean.ted$first_tag)
+
+#find the top ten tags
+top.10.tags <-
+clean.ted %>% 
+  filter(first_tag != "TEDx") %>% 
+  group_by(first_tag) %>%
+  summarise(tag.freq = n()) %>% 
+  arrange(desc(tag.freq)) %>% 
+  head(n = 10) %>% 
+  select(first_tag) %>% 
+  as.matrix() 
+
+#recode all the other tags to 'other'
+levels(clean.ted$first_tag)[which(!levels(clean.ted$first_tag) %in% top.10.tags)] <- "other"
+
+
+Views.Tags <-
+clean.ted %>% 
+#  filter(first_tag != "other") %>% 
+  ggplot(aes(x = reorder(first_tag, -logcomm), y = logviews)) +
+  geom_boxplot(aes(fill = first_tag)) +
+  labs(title = "Views by topic of talk", x = "Topic", y =  "Logged Views") +
+  theme(axis.text.x = element_text(angle = 75, hjust = 1)) +
+  guides(fill = FALSE) +
+  scale_fill_futurama()
+
+ggsave("views_tags.png", Views.Tags)
+Views.Tags
+
+Comments.Tags <-
+  clean.ted %>% 
+#  filter(first_tag != "other") %>% 
+  ggplot(aes(x = reorder(first_tag, -logcomm), y = logcomm)) +
+  geom_boxplot(aes(fill = first_tag)) +
+  labs(title = "Comments by topic of talk", x = "Topic", y =  "Logged Comments") +
+  theme(axis.text.x = element_text(angle = 75, hjust = 1)) +
+  guides(fill = FALSE) +
+  scale_fill_futurama()
+
+ggsave("comm_tags.png", Comments.Tags)
+Comments.Tags
+
+```
+ 
+Views and Comments by Gender
+
+```{r gender graphs}
+
+gender.ted <-
+  clean.ted %>% 
+  filter(!is.na(gender))
+
+Views.Gender <-
+gender.ted %>% 
+  ggplot(aes(x = gender, y = logviews)) +
+  geom_violin(aes(fill = gender)) +
+  labs(title = "Views by gender of speaker", x = "Gender", y =  "Logged Views") +
+  guides(fill = FALSE) +
+  scale_fill_futurama()
+
+#ggsave("views_gender.png", Views.Gender)
+Views.Gender
+
+Comments.Gender <-
+gender.ted %>% 
+  ggplot(aes(x = gender, y = logcomm)) +
+  geom_violin(aes(fill = gender)) +
+  labs(title = "Comments by gender of speaker", x = "Gender", y =  "Logged Comments") +
+  guides(fill = FALSE) +
+  scale_fill_futurama()
+
+#ggsave("comm_gender.png", Comments.Gender)
+Comments.Gender
+
+
+```
+
+#Statisitical Analysis
+
+Views and Comments by Occupation and Topic
+
+```{r occupation x topic anova}
+
+# views by occupation x topic
+occupation.topic.model.views <-
+  lm(logviews~speaker_occupation*first_tag, data = clean.ted)
+
+anova(occupation.topic.model.views)
+
+#model without interactions
+occupation.topic.model.views.simple <-
+  lm(logviews~speaker_occupation + first_tag, data = clean.ted)
+anova(occupation.topic.model.views.simple)
+
+occupation.means <-
+  emmeans(occupation.topic.model.views.simple, ~ speaker_occupation*first_tag)
+
+#planned contrasts -- views
+#psychologists vs. all other occupations
+occ.contrast.1 <-
+  matrix(0, 
+         nrow = length(levels(clean.ted$speaker_occupation)),
+         ncol = length(levels(clean.ted$first_tag)))
+rownames(occ.contrast.1) = levels(clean.ted$speaker_occupation)
+colnames(occ.contrast.1) = levels(clean.ted$first_tag)
+
+pscy.contrast <- occ.contrast.1
+pscy.contrast[c("Psychologist"), 
+              c("activism", "Africa", "animals", "art", "brain", "business", "children", "culture", "Internet", "TED Fellows" )] = 1/11
+pscy.contrast[c( "other", "Architect", "Artist", "Designer", "Entrepreneur", "Inventor", "Journalist", "Photographer", "Writer"), 
+              c("activism", "Africa", "animals", "art", "brain", "business", "children", "culture", "Internet", "TED Fellows" )] = -1/99
+
+pscy.contrast <- as.vector(pscy.contrast)
+pscy.contrast <- list(psyc.vs.everyone = pscy.contrast)
+
+contrast(occupation.means, pscy.contrast)
+
+#brain vs. all other topics
+topic.contrast.1 <-
+  matrix(0, 
+         nrow = length(levels(clean.ted$speaker_occupation)),
+         ncol = length(levels(clean.ted$first_tag)))
+rownames(topic.contrast.1) = levels(clean.ted$speaker_occupation)
+colnames(topic.contrast.1) = levels(clean.ted$first_tag)
+
+brain.contrast <- topic.contrast.1
+brain.contrast[c("other", "Architect", "Artist", "Designer", "Entrepreneur", "Inventor", "Journalist", "Photographer", "Writer"),
+               "brain"] = 1/9
+brain.contrast[c("other", "Architect", "Artist", "Designer", "Entrepreneur", "Inventor", "Journalist", "Photographer", "Writer"),
+               c("activism", "Africa", "animals", "art", "business", "children", "culture", "Internet", "TED Fellows")] = -1/81
+
+brain.contrast <- as.vector(brain.contrast)
+brain.contrast <- list(brain.vs.everything = brain.contrast)
+
+contrast(occupation.means, brain.contrast)
+
+
+# comments by occupation x topic
+occupation.topic.model.comments <-
+  lm(logcomm~speaker_occupation*first_tag, data = clean.ted)
+
+anova(occupation.topic.model.comments)
+
+#model without interactions
+occupation.topic.model.comments.simple <-
+  lm(logcomm~speaker_occupation + first_tag, data = clean.ted)
+anova(occupation.topic.model.comments.simple)
+
+occupation.means.comm <-
+  emmeans(occupation.topic.model.comments.simple, ~ speaker_occupation*first_tag)
+
+#planned contrasts -- comments
+#psychologists vs. the rest of the top 10
+occ.contrast.2 <-
+  matrix(0, 
+         nrow = length(levels(clean.ted$speaker_occupation)),
+         ncol = length(levels(clean.ted$first_tag)))
+rownames(occ.contrast.2) = levels(clean.ted$speaker_occupation)
+colnames(occ.contrast.2) = levels(clean.ted$first_tag)
+
+pscy.contrast.2 <- occ.contrast.2
+pscy.contrast.2[c("Psychologist"), 
+              c("activism", "Africa", "animals", "art", "brain", "business", "children", "culture", "Internet", "TED Fellows" )] = 1/11
+pscy.contrast.2[c("other", "Architect", "Artist", "Designer", "Entrepreneur", "Inventor", "Journalist", "Photographer", "Writer"), 
+              c("activism", "Africa", "animals", "art", "brain", "business", "children", "culture", "Internet", "TED Fellows" )] = -1/99
+
+pscy.contrast.2 <- as.vector(pscy.contrast.2)
+pscy.contrast.2 <- list(psyc.vs.everyone.2 = pscy.contrast.2)
+
+contrast(occupation.means.comm, pscy.contrast.2)
+
+
+#brain vs. all other topics
+topic.contrast.2 <-
+  matrix(0, 
+         nrow = length(levels(clean.ted$speaker_occupation)),
+         ncol = length(levels(clean.ted$first_tag)))
+rownames(topic.contrast.2) = levels(clean.ted$speaker_occupation)
+colnames(topic.contrast.2) = levels(clean.ted$first_tag)
+
+brain.contrast.2 <- topic.contrast.2
+brain.contrast.2[c("other", "Architect", "Artist", "Designer", "Entrepreneur", "Inventor", "Journalist", "Photographer", "Writer"),
+               "brain"] = 1/9
+brain.contrast.2[c("other", "Architect", "Artist", "Designer", "Entrepreneur", "Inventor", "Journalist", "Photographer", "Writer"),
+               c("activism", "Africa", "animals", "art", "business", "children", "culture", "Internet", "TED Fellows" )] = -1/81
+
+brain.contrast.2 <- as.vector(brain.contrast.2)
+brain.contrast.2 <- list(brain.vs.everything.2 = brain.contrast.2)
+
+contrast(occupation.means.comm, brain.contrast.2)
+
+```
+
+Views and Comments by Gender
+
+```{r gender t test}
+
+women.ted <-
+  gender.ted %>% 
+  filter(gender == 'female')
+
+male.ted <-
+  gender.ted %>% 
+  filter(gender == 'male')
+
+# views by gender
+gender.model.views <-
+  t.test(women.ted$logviews, male.ted$logviews)
+
+gender.model.views
+
+# comments by gender
+gender.model.comments <-
+  t.test(women.ted$logcomm, male.ted$logcomm)
+
+gender.model.comments
+
+````
+
