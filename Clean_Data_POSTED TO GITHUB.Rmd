@@ -1,0 +1,603 @@
+---
+title: "Ted Talks - Clean Data"
+author: "Stefanie Holden, Debra Lindsay, Andrew Marin, & Alex Rett"
+date: "11/26/2018"
+output: html_document
+---
+  
+  ```{r setup, include=FALSE}
+```
+# packages used 
+```{r, eval = FALSE}
+
+#install.packages("ngram")
+#install.packages("anytime")
+#install.packages("formattable")
+#install.packages("kableExtra")
+#install.packages("tidytext")
+#install.packages("yarrr")
+
+```
+
+```{r}
+library(anytime)
+library(formattable) 
+library(gender)
+library(kableExtra) 
+library(knitr) 
+library(tidytext)
+library(tidyverse) 
+library(yarrr)
+library(ngram)
+
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Data Used 
+
+We have two csv files that were downloaded from a Kaggle dataset that crawled the Ted.com website on September 25, 2017.
+
+1. Includes surface information about the talks including speaker, location of talk, date uploaded, talk title, number of comments, number of views, ratings - among other variables. The unique variable for each talk is its url.
+https://www.dropbox.com/s/9fbmnkja8vvaw6m/ted_raw.csv
+
+2. Includes the whole transcript for the talk including points of laughter and applause. The unique variable for each talk is its url.
+https://www.dropbox.com/s/3spn0pj3jh5b113/transcripts_raw.csv
+
+There are 83 talks that do not have transcripts and these are dropped from the data
+
+```{r}
+ted.data <- 
+  read.csv("ted_raw.csv",
+           na.strings = "")
+ted.transcripts <- 
+  read.csv("transcripts_raw.csv",
+           na.strings = "")
+# bind the two data sets together (matching url) so we can have one clean data set
+ted.data.transcripts <-
+  merge(x = ted.data,
+        y = ted.transcripts,
+        by = "url",
+        no.dups = TRUE)
+```
+
+In order to run text analysis on our variables we need them to be recorded as characters.
+
+```{r}
+ted.data.transcripts <-
+ted.data.transcripts %>% 
+mutate(description = as.character(description),
+event = as.character(event),
+main_speaker = as.character(main_speaker),
+name = as.character(name),
+speaker_occupation = as.character(speaker_occupation),
+title = as.character(title),
+transcript = as.character(transcript),
+tags = as.character(tags))
+```
+
+To start, we'll cut down on the data we have by excluding musical performances, since this isn't interesting to our question about talks specifically
+
+```{r}
+# Removal of musical performances #
+
+# make new column with the number of characters in each transcript (since musical perofrmances have low counts)
+ted.data.transcripts <- ted.data.transcripts %>%
+  mutate(number.char = nchar(transcript))
+
+# filter our original dataset so that all musical performances are removed (removes 40)
+ted.data.transcripts <-  ted.data.transcripts %>%
+ filter(!(((str_detect(tags, "live music") 
+           | str_detect(tags, "cello") 
+           | str_detect(tags, "guitar") 
+           | str_detect(tags, "performance") 
+           | str_detect(tags, "piano")
+           | str_detect(tags, "dance")
+          | str_detect(tags, "music")
+          | str_detect(tags, "creativity") 
+          ) 
+          & (number.char < 2000)
+          )
+        | number.char < 50))
+
+
+```
+
+
+
+Now to cut our years so that we're only looking at the year 2006 to the year 2017 (up to 150 prior to the scraped date, b/c of references indicating that the number of views a video gets in this time is representative of it's preicted views)
+
+
+The time that the videos were uploaded is recorded in unix timestamp (number of seconds from January 1st, 1970 at UTC). 
+As this isn't a very meaningful time period it has been converted to a more readable format - year, months, date, and time that the video was published.
+
+```{r}
+ted.data.transcripts <-
+ted.data.transcripts %>% 
+mutate(published_date_readable = as.POSIXct(published_date, origin = "1970-01-01"))
+```
+
+
+```{r}
+# filter so that we're only look at the years 2006 to April 28 2017
+
+#make new columns with easy to read publish and film dates
+ted.data.transcripts <- ted.data.transcripts %>%
+  mutate(publish.date = anydate(ted.data.transcripts$published_date), 
+         film.date = anydate(ted.data.transcripts$film_date))
+
+#Change the UNIX timedstamps to something readable
+ted.data.transcripts$film_date <- anydate(ted.data.transcripts$film_date)
+ted.data.transcripts$published_date <- anydate(ted.data.transcripts$published_date)
+
+
+#add column for filming year
+
+ted.data.transcripts$filming_year <- as.numeric(format(ted.data.transcripts$film.date, format = "%Y"))
+
+#add column for publish year
+ted.data.transcripts$published_year <- as.numeric(format(ted.data.transcripts$publish.date, format = "%Y"))
+
+
+#filter so that we only have videos with a publish date prior to April 28, 2017
+
+ted.data.transcripts <- ted.data.transcripts %>%
+  filter(publish.date < "2017-04-28")
+
+# thus far we've removed 40 videos for musical performances, and an additional 109 for the date cutoff
+```
+
+
+To make our data cleaner, we're going to log our views and comments
+
+
+```{r}
+#new columns with log transformations
+ted.data.transcripts <-
+ ted.data.transcripts %>%
+  mutate(logviews = log10(views),
+         logcomm = log10(comments))
+```
+
+Visualtion of our new views data after log transformation
+
+```{r}
+plot.views = ggplot(data = ted.data.transcripts, mapping = aes(published_date_readable, logviews)) +
+geom_point(position = 'jitter', size = .8, alpha = .2) +
+scale_x_datetime(breaks = '2 years', date_labels = "%Y") +
+scale_y_continuous(minor_breaks = 100000) +
+geom_smooth(method = lm) +
+theme_minimal() +
+ggtitle("Views as a Function of Year Published") +
+labs(x = "Year Published", y = "Views")
+lm(views~published_date, data = ted.data.transcripts) %>% 
+anova(); plot.views
+```
+ #Gender
+  
+  A question we are interested in is whether the gender of the speaker impacts engagement. To do this we need to extract gender information from the speaker name. We did this using the 'gender' package.
+
+```{r}
+#edit the original data so that Speaker Name is separated into first name and last name
+ted.data.transcripts <- ted.data.transcripts %>%
+  separate(main_speaker, into = c("first_name","last_name"), convert = T)
+
+
+# generate a data frame of the predicted gender of each name in our dataset of TED names 
+ted.data.gender <- ted.data.transcripts %>% 
+  distinct(first_name) %>% 
+  rowwise() %>% 
+  do(results = gender(.$first_name, method = "ssa")) %>% 
+  do(bind_rows(.$results))
+
+#rename name column in gender data frame 
+names(ted.data.gender)[names(ted.data.gender) == 'name'] <- 'first_name'
+
+#combine the genders generated from the historical data with our original TED data
+ted.data.transcripts <- ted.data.transcripts %>%
+  left_join(ted.data.gender, by = "first_name")
+
+## we have 184 people with missing gender ## 
+males <- ted.data.transcripts %>%
+  filter(gender == "male")
+females <- ted.data.transcripts %>%
+  filter(gender == "female")
+
+#graph of gender distribution in dataframe
+ted.data.transcripts %>%
+  subset(.,!is.na(gender)) %>%
+  ggplot(aes(x = gender, fill = gender)) +
+  geom_histogram(stat = "count") +
+  theme_minimal() +
+  ggtitle("Distribution of Female to Male Speakers") +
+  labs(x = "Gender", y = "Frequency") +
+  guides(fill = FALSE)
+```
+
+
+NOW, to publish our cleaned up CSV 
+
+```{r, eval = FALSE}
+# write.csv(ted.data.transcripts, file = "YEAR_Cleaned.ted.data.transcripts.csv")
+```
+
+Adding laughter and appolause
+
+```{r}
+#first of all we need to make sure all the transcripts are in lowercase so we can work on them.
+#also calculating the number of senteces, laughters, and applauses.
+ted.data.transcripts <-
+  ted.data.transcripts %>% 
+  mutate(transcript = tolower(transcript),
+         laugh.count = str_count(transcript,
+                                 pattern = "(laughter)"),
+         applause.count = str_count(transcript,
+                                    pattern = "(applause)"))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+***
+#SENTIMENT ANALYSIS
+  The following is code used to aid in visualization for sentiment analysis.
+```{r}
+theme_lyrics <- function(aticks = element_blank(),
+                         pgminor = element_blank(),
+                         lt = element_blank(),
+                         lp = "none")
+  
+{
+  theme(plot.title = element_text(hjust = 0.5), #Center the title
+        axis.ticks = aticks, #Set axis ticks to on or off
+        panel.grid.minor = pgminor, #Turn the minor grid lines on or off
+        legend.title = lt, #Turn the legend title on or off
+        legend.position = lp) #Turn the legend on or off
+}
+
+#Customize the text tables for consistency using HTML formatting
+my_kable_styling <- function(dat, caption) {
+  kable(dat, "html", escape = FALSE, caption = caption) %>%
+    kable_styling(bootstrap_options = c("striped", "condensed", "bordered"),
+                  full_width = FALSE) }
+```
+  
+
+Load combined, clean data
+```{r}
+# new dataset for working on sentiment analysis
+sent.ted.data.transcripts <- read.csv("YEAR_Cleaned.ted.data.transcripts.csv", stringsAsFactors = FALSE, na.strings = "")
+# also populate a version of our original dataset that isn't changed (we'll use this later once we have all of our sentiment data to go back and merge the two into a clean dataset)
+ted.data.transcripts <- read.csv("YEAR_Cleaned.ted.data.transcripts.csv", stringsAsFactors = FALSE, na.strings = "")
+
+#and add a "number" column to each which will be like a video ID 
+ted.data.transcripts$number <- 1:nrow(ted.data.transcripts)
+
+sent.ted.data.transcripts$number <- 1:nrow(sent.ted.data.transcripts)
+
+```
+
+Tidy transcripts to tokenize 
+```{r}
+sent.ted.data.transcripts <- sent.ted.data.transcripts %>% 
+  unnest_tokens(word,transcript) %>% 
+  anti_join(stop_words)
+```
+
+Add column for distinct words.
+```{r}
+sent.ted.data.transcripts <- sent.ted.data.transcripts %>%
+ # dplyr::mutate(number = as.factor(number)) %>%
+  dplyr::group_by(published_year, number) %>%
+  # mutate(word_count = n_distinct(word))
+  mutate(word_count = length(unique(word)))
+```
+
+
+
+Word Level Analysis
+Create a word summary dataframe to calculate the distinct word count per transcript.The more diverse the talk transcipt, the larger the vocab
+```{r}
+word_summary <- sent.ted.data.transcripts %>%
+  group_by(published_year, number) %>%
+  mutate(word_count = n_distinct(word)) %>%
+  select(number, Year = published_year, word_count) %>%
+  distinct() %>% #To obtain one record per transcript
+  ungroup()
+
+```
+Visualize
+```{r}
+word.summary.plot <- pirateplot(formula =  word_count ~ Year, #Formula
+           data = word_summary, #Data frame
+           xlab = NULL, ylab = "Transcript Distinct Word Count", #Axis labels
+           main = "Lexical Diversity Per Year", #Plot title
+           pal = "google", #Color scheme
+           point.o = .2, #Points
+           avg.line.o = 1, #Turn on the Average/Mean line
+           theme = 0, #Theme
+           point.pch = 16, #Point `pch` type
+           point.cex = 1.5, #Point size
+           jitter.val = .1, #Turn on jitter to see the songs better
+           cex.lab = .9, cex.names = .7) #Axis label size
+
+word_summary
+```
+
+Talks per Year Data
+```{r}
+talks_year <- word_summary %>%
+  select(number, Year) %>%
+  group_by(Year) %>%
+  summarise(transcript_count = n())
+```
+
+# Lexicons
+
+```{r}
+new_sentiments <- sentiments %>% #From the tidytext package
+  filter(lexicon != "loughran") %>% #Remove the finance lexicon
+  mutate( sentiment = ifelse(lexicon == "AFINN" & score >= 0, "positive",
+                             ifelse(lexicon == "AFINN" & score < 0,
+                                    "negative", sentiment))) %>%
+  group_by(lexicon) %>%
+  mutate(words_in_lexicon = n_distinct(word)) %>%
+  ungroup()
+
+new_sentiments %>%
+  group_by(lexicon, sentiment, words_in_lexicon) %>%
+  summarise(distinct_words = n_distinct(word)) %>%
+  ungroup() %>%
+  spread(sentiment, distinct_words) %>%
+  mutate(lexicon = color_tile("lightblue", "lightblue")(lexicon),
+         words_in_lexicon = color_bar("lightpink")(words_in_lexicon)) %>% 
+  my_kable_styling(caption = "Word Counts Per Lexicon")
+
+
+```
+
+
+Calculate total distinct word counts in all transcripts
+```{r}
+distinct_words <- n_distinct(sent.ted.data.transcripts$word)
+total_distinct_words <- sum(distinct_words)
+```
+
+
+Check to see which lexicon is the best match for our sentiment analysis
+```{r}
+words_in_lexicon <- sent.ted.data.transcripts %>%
+  mutate(words_in_talks = total_distinct_words) %>%
+  inner_join(new_sentiments) %>%
+  group_by(lexicon, words_in_talks, words_in_lexicon) %>%
+  summarise(lex_match_words = n_distinct(word)) %>%
+  ungroup() %>%
+  mutate(total_match_words = sum(lex_match_words), #Not used but good to have
+         match_ratio = lex_match_words / words_in_talks) %>%
+  select(lexicon, lex_match_words,  words_in_talks, match_ratio) %>%
+  mutate(lex_match_words = color_bar("lightpink")(lex_match_words),
+         lexicon = color_tile("lightgreen", "lightgreen")(lexicon)) %>%
+  my_kable_styling(caption = "Words Found In Lexicons")
+
+words_in_lexicon
+```
+
+
+No great match here, but that makes sense I suppose since not all words have sentiment. Given the highest ratio is with NRC, we will use this for our sentiment analysis.
+
+```{r}
+transcript_nrc <- sent.ted.data.transcripts %>% 
+  inner_join(get_sentiments("nrc"))
+```
+
+Since words can appear in multiple categories in NRC, such as negative/fear or positive/joy, we create a subset without positive and negative categories to use later. Additionally, we will create a subset with only negative and positive values.
+```{r}
+transcipt_nrc_sub_no_val <- sent.ted.data.transcripts %>% 
+  inner_join(get_sentiments("nrc")) %>% 
+  filter(!sentiment %in% c("positive", "negative"))
+
+transcripts_nrc_sub_val <- sent.ted.data.transcripts %>% 
+  inner_join(get_sentiments("nrc")) %>% 
+  filter(sentiment %in% c("positive", "negative"))
+```
+
+Sentiment and Valence Frequencies
+```{r}
+sentiment_freq <-  transcript_nrc %>%
+  filter(filming_year != "NA" & !sentiment %in% c("positive", "negative")) %>%
+  count(sentiment) %>%
+  group_by(sentiment) %>%
+  summarise(sentiment_sum = sum(n)) %>%
+  ungroup()
+
+val_freq <- transcript_nrc %>%
+  filter(filming_year != "NA" & sentiment %in% c("positive", "negative")) %>%
+  count(sentiment) %>%
+  group_by(sentiment) %>%
+  summarise(sentiment_sum = sum(n)) %>%
+  ungroup() 
+```
+
+Sentiment Count Per Video
+```{r}
+Sentiment_Count_Per_Vid <- transcript_nrc %>%
+  group_by(number, sentiment, published_year, logviews) %>%
+  summarise(sentiment_count = n())
+
+```
+
+
+
+Sentiment Ratio
+```{r}
+Sentiment.Ratio <-
+  merge(x = word_summary,
+        y = Sentiment_Count_Per_Vid,
+        by = "number",
+        no.dups = TRUE)
+
+Sentiment.Ratio <- Sentiment.Ratio %>% 
+  filter(published_year != "NA" & !sentiment %in% c("positive", "negative")) %>% 
+  mutate(Sentiment_Word_Ratio = sentiment_count/word_count) 
+```
+
+
+
+
+```{r}
+ggplot(Sentiment.Ratio, aes(x = Sentiment_Word_Ratio, y = logviews)) +
+    geom_jitter() +
+    facet_wrap(~sentiment) 
+```
+
+### END OF SENTIMENT ANALYSIS - NOW ONTO OTHER DATA ANALYSIS ### 
+
+
+
+
+
+
+
+
+Now to join our sentiment word counts back into our original working df ("ted.data.transcripts") by "number" 
+
+```{r}
+
+# I made a df that has the overall count of sentiment words in it 
+sentiment_freq_per_video <-  transcript_nrc %>%
+  filter(filming_year != "NA" & !sentiment %in% c("positive", "negative")) %>%
+  count(sentiment) %>%
+  group_by(number) %>%
+  summarise(sentiment_sum = sum(n)) %>%
+  ungroup()
+
+# now I'll join this back to our original df so that it has a number column
+
+# bind the two data sets together (matching url) so we can have one clean data set
+ted.data.transcripts <-
+  merge(x = ted.data.transcripts,
+        y = sentiment_freq_per_video,
+        by = "number",
+        no.dups = TRUE)
+
+# now our original - ted.data.transcripts - has the overall number of sentiment words per video in it (linked on the number column)
+
+# now to try and get overall sums of each type of sentiment word per video 
+
+# Sentiment_Count_Per_Vid # this dataframe has all the counts in column form... 
+
+WIDE_sentiment_count_per_vid <- spread(Sentiment_Count_Per_Vid, sentiment, sentiment_count)
+WIDE_sentiment_count_per_vid$published_year <- NULL
+WIDE_sentiment_count_per_vid$logviews <- NULL
+
+# okay so now it's in wide format, i'll add it to our ted.data.transcripts main one so that they're all new columns.. 
+ted.data.transcripts <-
+  merge(x = ted.data.transcripts,
+        y = WIDE_sentiment_count_per_vid,
+        by = "number",
+        no.dups = TRUE)
+
+# now I'll make a new csv of this to send out to everyone... 
+
+# write.csv(ted.data.transcripts, file = "ted.data.transcripts_AR_12_12_18.csv")
+
+```
+
+Now all of our sentiment counts are in our original df.. 
+
+First step is to log all of the sentiment word predictors since they're pretty skewed... 
+
+```{r}
+# new column with the logged version of each (note, there's NAs in each column still, will be converted to 0s after taking the logs of each)
+ted.data.transcripts <- ted.data.transcripts %>%
+  mutate(logsentiment_sum = log10(sentiment_sum),
+         loganger = log10(anger),
+         loganticipation = log10(anticipation),
+         logdisgust = log10(disgust),
+         logfear = log10(fear),
+         logjoy = log10(joy),
+         lognegative = log10(negative),
+         logpositive = log10(positive),
+         logsadness = log10(sadness),
+         logsurprise = log10(surprise),
+         logtrust = log10(trust))
+
+```
+
+
+There's some NAs in our dataset for counts of each type of word.. which I think would be better represented as 0s
+
+```{r}
+## uh oh, there's NAs in here... let me look at that.. 
+
+pos.na = sum(is.na(ted.data.transcripts$positive))
+anger.na = sum(is.na(ted.data.transcripts$anger))
+
+# could go on and on... just going to recode all columns with NAs with a "0" for the columns that have them (anger, disgust, fear, negative, - SPECIFICALLY DOING THIS FOR THE LOG TRANSFORMED COLUMNS, since this will be our working column.... so be careful here because logging them again will convert them to NAs again)
+
+ted.data.transcripts$loganger[is.na(ted.data.transcripts$loganger)] <- 0
+ted.data.transcripts$logdisgust[is.na(ted.data.transcripts$logdisgust)] <- 0
+ted.data.transcripts$logfear[is.na(ted.data.transcripts$logfear)] <- 0
+ted.data.transcripts$lognegative[is.na(ted.data.transcripts$lognegative)] <- 0
+ted.data.transcripts$logsadness[is.na(ted.data.transcripts$logsadness)] <- 0
+
+
+#check to see if it worked... should have no more NAs
+sum(is.na(ted.data.transcripts$loganger))
+```
+
+Okay, now I'll attempt to make some models including the different sentiment counts as predictors of views (and maybe comments?)
+
+```{r}
+# looking at a model with... ?all? of the sentiment words? 
+
+#graph of same thing 
+ted.data.transcripts %>%
+  filter(gender != "NA")%>%
+  ggplot(aes(x = log10(logsentiment_sum), y = logviews))+
+  geom_jitter()+
+  facet_grid(.~gender)+
+  geom_smooth(method = lm)+
+  ggtitle("Views as a Function of Number of Sentiment Words used for MALES and FEMALES")
+
+
+# model again with all predictors logged) 
+lm.all.sent.log = lm(data = ted.data.transcripts, logviews ~ loganger + loganticipation + logdisgust + logfear + logjoy + lognegative + logpositive + logsadness + logsurprise + logtrust)
+summary(lm.all.sent.log)
+
+lm.surprise.joy = lm(data = ted.data.transcripts, logviews ~ logsurprise + logjoy)
+summary(lm.surprise.joy)
+
+# let's see if the number of sentiment words used is predictive of views for males and females separately.. 
+
+lm.gender.sent = lm(data = ted.data.transcripts, logviews ~ gender*logsentiment_sum)
+anova(lm.gender.sent)
+
+# more accurately looking at the interaction instead... 
+
+lm.gender.sent = lm(data = ted.data.transcripts, logviews ~ gender*log10(sentiment_sum))
+anova(lm.gender.sent)
+str(ted.data.transcripts)
+
+ted.data.transcripts2 <- ted.data.transcripts %>%
+  mutate(sentiment_sum = as.numeric(sentiment_sum))
+```
+
+
