@@ -525,10 +525,53 @@ ted.data.transcripts <-
 
 Now all of our sentiment counts are in our original df.. 
 
-First step is to log all of the sentiment word predictors since they're pretty skewed... 
+
+
+Add a column for the overall number of words in each transcript so we can get ratio of sentiment words 
 
 ```{r}
-# new column with the logged version of each (note, there's NAs in each column still, will be converted to 0s after taking the logs of each)
+
+# merge # of words per transcript to original df
+ted.data.transcripts <-
+  merge(x = ted.data.transcripts,
+        y = word_summary,
+        by = "number",
+        no.dups = TRUE)
+
+ted.data.transcripts$Year <- NULL
+
+```
+
+Calculate Ratios of sentiment words
+
+```{r}
+ted.data.transcripts <- ted.data.transcripts %>%
+  mutate(sentiment.ratio = sentiment_sum/word_count,
+         anger.ratio = anger/word_count,
+         anticipation.ratio = anticipation/word_count,
+         disgust.ratio = disgust/word_count,
+         fear.ratio = fear/word_count,
+         joy.ratio = joy/word_count,
+         negative.ratio = negative/word_count,
+         positive.ratio = positive/word_count,
+         sadness.ratio = sadness/word_count,
+         surprise.ratio = surprise/word_count,
+         trust.ratio = trust/word_count)
+
+# looking at skewness to see if we should log transform.. probably a good idea.. 
+ted.data.transcripts %>%
+  ggplot(aes(x = sentiment.ratio))+
+  geom_histogram()
+
+```
+
+
+
+
+Now to log all of the sentiment word predictors since they're pretty skewed... 
+
+```{r}
+# new column with the logged version of each word (note, there's NAs in each column still, will be converted to 0s after taking the logs of each)
 ted.data.transcripts <- ted.data.transcripts %>%
   mutate(logsentiment_sum = log10(sentiment_sum),
          loganger = log10(anger),
@@ -543,6 +586,28 @@ ted.data.transcripts <- ted.data.transcripts %>%
          logtrust = log10(trust))
 
 ```
+
+
+ALSO going to log the ratios... 
+
+```{r}
+# new column with the logged version of each ratio (note, there's NAs in each column still, will be converted to 0s after taking the logs of each)
+ted.data.transcripts <- ted.data.transcripts %>%
+  mutate(logsentiment.sum.ratio = log10(sentiment.ratio),
+         loganger.ratio = log10(anger.ratio),
+         loganticipation.ratio = log10(anticipation.ratio),
+         logdisgust.ratio = log10(disgust.ratio),
+         logfear.ratio = log10(fear.ratio),
+         logjoy.ratio = log10(joy.ratio),
+         lognegative.ratio = log10(negative.ratio),
+         logpositive.ratio = log10(positive.ratio),
+         logsadness.ratio = log10(sadness.ratio),
+         logsurprise.ratio = log10(surprise.ratio),
+         logtrust.ratio = log10(trust.ratio))
+
+```
+
+
 
 
 There's some NAs in our dataset for counts of each type of word.. which I think would be better represented as 0s
