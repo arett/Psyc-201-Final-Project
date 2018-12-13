@@ -631,38 +631,7 @@ ted.data.transcripts$logsadness[is.na(ted.data.transcripts$logsadness)] <- 0
 sum(is.na(ted.data.transcripts$loganger))
 ```
 
-Okay, now I'll attempt to make some models including the different sentiment counts as predictors of views (and maybe comments?)
 
-```{r}
-# looking at a model with... ?all? of the sentiment words? 
-
-#graph of same thing 
-ted.data.transcripts %>%
-  filter(gender != "NA")%>%
-  ggplot(aes(x = log10(logsentiment_sum), y = logviews))+
-  geom_jitter()+
-  facet_grid(.~gender)+
-  geom_smooth(method = lm)+
-  ggtitle("Views as a Function of Number of Sentiment Words used for MALES and FEMALES")
-
-
-# model again with all predictors logged
-lm.all.sent.log = lm(data = ted.data.transcripts, logviews ~ loganger + loganticipation + logdisgust + logfear + logjoy + lognegative + logpositive + logsadness + logsurprise + logtrust)
-summary(lm.all.sent.log)
-
-lm.surprise.joy = lm(data = ted.data.transcripts, logviews ~ logsurprise + logjoy)
-summary(lm.surprise.joy)
-
-# let's see if the number of sentiment words used is predictive of views for males and females separately.. 
-
-lm.gender.sent = lm(data = ted.data.transcripts, logviews ~ gender*logsentiment_sum)
-anova(lm.gender.sent)
-
-# more accurately looking at the interaction instead... 
-
-lm.gender.sent = lm(data = ted.data.transcripts, logviews ~ gender*logsentiment_sum)
-anova(lm.gender.sent)
-str(ted.data.transcripts)
 
 ```
 
